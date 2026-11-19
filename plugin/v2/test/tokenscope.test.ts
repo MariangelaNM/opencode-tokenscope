@@ -36,9 +36,12 @@ function assistant(id: string, tokens: typeof noUsage, content: unknown[] = []) 
 async function loadPlugin(input: {
   sessions: Record<string, ReturnType<typeof sessionInfo>>
   contexts: Record<string, unknown[]>
+  children?: Record<string, string[]>
   options?: Record<string, unknown>
 }) {
-  const registered: { tool?: any; command?: any; rpc?: any; contextHook?: (event: any) => void } = {}
+  const registered: { tool?: any; commands: Record<string, any>; rpc?: any; contextHook?: (event: any) => void } = {
+    commands: {},
+  }
   const prompts: any[] = []
   const contextCalls: string[] = []
   const registration = { dispose: async () => {} }
@@ -60,8 +63,8 @@ async function loadPlugin(input: {
         contextCalls.push(sessionID)
         return input.contexts[sessionID] ?? []
       },
-      async list() {
-        return { data: [], cursor: {} }
+      async list({ parentID }: { parentID?: string }) {
+        return { data: (input.children?.[parentID ?? ""] ?? []).map((id) => input.sessions[id]), cursor: {} }
       },
       async prompt(prompt: unknown) {
         prompts.push(prompt)
@@ -90,7 +93,7 @@ async function loadPlugin(input: {
     },
     command: {
       async transform(callback: (editor: any) => void) {
-        callback({ add: (command: any) => (registered.command = command) })
+        callback({ add: (command: any) => (registered.commands[command.name] = command) })
         return registration
       },
     },
@@ -162,18 +165,18 @@ function captureRequest(harness: Harness, sessionID: string) {
   })
 }
 
-test("registers a V2 plugin with a directly callable tool and a /tokenscope-report command", async () => {
+test("registers a directly callable tool and separate report and total commands", async () => {
   const harness = await loadPlugin({ sessions: {}, contexts: {} })
-  const { tool, command } = harness.registered
+  const { tool, commands } = harness.registered
 
   expect(plugin.id).toBe("tokenscope")
   expect(tool.name).toBe("tokenscope")
   expect(tool.options).toEqual({ codemode: false })
   expect(tool.input.type).toBe("object")
-  expect(Object.keys(tool.input.properties)).toEqual(["sessionID", "limitMessages", "includeSubagents"])
-  expect(command.name).toBe("tokenscope-report")
+  expect(Object.keys(tool.input.properties)).toEqual(["sessionID", "limitMessages", "includeSubagents", "summaryOnly"])
+  expect(Object.keys(commands)).toEqual(["tokenscope-report", "tokenscope-total"])
 
-  await command.execute({ sessionID: "ses_current", prompt: { text: "  focus on tools " }, delivery: "steer" })
+  await commands["tokenscope-report"].execute({ sessionID: "ses_current", prompt: { text: "  focus on tools " }, delivery: "steer" })
 
   expect(harness.prompts).toHaveLength(1)
   expect(harness.prompts[0].sessionID).toBe("ses_current")
@@ -181,6 +184,40 @@ test("registers a V2 plugin with a directly callable tool and a /tokenscope-repo
   expect(harness.prompts[0].text).toContain("Call the tokenscope tool directly")
   expect(harness.prompts[0].text).toContain("read the exact unique report path returned by TokenScope")
   expect(harness.prompts[0].text.endsWith("focus on tools")).toBe(true)
+
+  await commands["tokenscope-total"].execute({ sessionID: "ses_current", prompt: { text: "" }, delivery: "queue" })
+  expect(harness.prompts[1].delivery).toBe("queue")
+  expect(harness.prompts[1].text).toContain("summaryOnly set to true")
+  expect(harness.prompts[1].text).not.toContain("report path")
+})
+
+test("summaryOnly returns only the recorded total and honors includeSubagents", async () => {
+  const directory = await tempDirectory()
+  const usage = { input: 1_200, output: 80, reasoning: 20, cache: { read: 300, write: 900 } }
+  const childUsage = { input: 500, output: 10, reasoning: 0, cache: { read: 0, write: 0 } }
+  const harness = await loadPlugin({
+    sessions: {
+      ses_current: sessionInfo("ses_current", directory, { tokens: usage }),
+      ses_child: sessionInfo("ses_child", directory, { tokens: childUsage }),
+    },
+    contexts: {
+      ses_current: [assistant("msg_1", usage)],
+      ses_child: [assistant("msg_2", childUsage)],
+    },
+    children: { ses_current: ["ses_child"] },
+  })
+
+  expect(await harness.run({ summaryOnly: true })).toEqual({ content: "3,010 tokens" })
+  expect(await harness.run({ summaryOnly: true, includeSubagents: false })).toEqual({ content: "2,500 tokens" })
+})
+
+test("summaryOnly reports empty and unreadable sessions inline", async () => {
+  const directory = await tempDirectory()
+  const harness = await loadPlugin({ sessions: { ses_current: sessionInfo("ses_current", directory) }, contexts: {} })
+  expect(await harness.run({ summaryOnly: true })).toEqual({ content: "Session ses_current has no messages yet." })
+  expect(await harness.run({ summaryOnly: true, sessionID: "ses_missing" })).toEqual({
+    content: "TokenScope could not calculate the total: Session not found: ses_missing",
+  })
 })
 
 test("analyzes the calling session and measures context from the captured model request", async () => {

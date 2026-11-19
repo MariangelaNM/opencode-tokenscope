@@ -87,15 +87,25 @@ export function buildFailureReport(sessionID: string | undefined, warnings: stri
   return lines.join("\n")
 }
 
-export function buildSuccessSummary(outputPath: string, analysis: TokenAnalysis): string {
-  const timestamp = new Date().toISOString()
-  const localEstimatedTokens = analysis.totalTokens
-  const mainSessionTelemetryTokens =
+function recordedSessionTokens(analysis: TokenAnalysis): number {
+  return (
     analysis.inputTokens +
     analysis.outputTokens +
     analysis.reasoningTokens +
     analysis.cacheReadTokens +
     analysis.cacheWriteTokens
+  )
+}
+
+export function formatTokenTotal(analysis: TokenAnalysis): string {
+  const total = recordedSessionTokens(analysis) + (analysis.subagentAnalysis?.totalTokens ?? 0)
+  return `${new Intl.NumberFormat("en-US").format(total)} tokens`
+}
+
+export function buildSuccessSummary(outputPath: string, analysis: TokenAnalysis): string {
+  const timestamp = new Date().toISOString()
+  const localEstimatedTokens = analysis.totalTokens
+  const mainSessionTelemetryTokens = recordedSessionTokens(analysis)
   const formattedLocalEstimated = new Intl.NumberFormat("en-US").format(localEstimatedTokens)
   const formattedMainTelemetry = new Intl.NumberFormat("en-US").format(mainSessionTelemetryTokens)
 
@@ -108,11 +118,8 @@ export function buildSuccessSummary(outputPath: string, analysis: TokenAnalysis)
 
   if (analysis.subagentAnalysis && analysis.subagentAnalysis.subagents.length > 0) {
     const subagentTokens = new Intl.NumberFormat("en-US").format(analysis.subagentAnalysis.totalTokens)
-    const grandTotal = new Intl.NumberFormat("en-US").format(
-      mainSessionTelemetryTokens + analysis.subagentAnalysis.totalTokens
-    )
     summaryMsg += `\nSubagent sessions: ${analysis.subagentAnalysis.subagents.length} (${subagentTokens} tokens)`
-    summaryMsg += `\nGrand total: ${grandTotal} tokens`
+    summaryMsg += `\nGrand total: ${formatTokenTotal(analysis)}`
   }
 
   if (analysis.warnings.length > 0) {

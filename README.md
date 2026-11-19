@@ -143,6 +143,7 @@ TokenScope is an OpenCode plugin and tool, not a standalone CLI or transcript-fi
 | Command | OpenCode V2 | OpenCode V1 |
 | --- | --- | --- |
 | `/tokenscope` | Opens the [token usage panel](#token-usage-panel-opencode-v2); no model request | Has the model print the text report |
+| `/tokenscope-total` | Has the model show only the recorded token total, without writing a report | Not available |
 | `/tokenscope-report` | Has the model print the text report | Not available |
 
 The text-report command is a small prompt (a prompt file on V1, registered by the plugin on V2) that invokes the plugin's `tokenscope` tool, reads the exact report path it returns, and prints the report verbatim. Agents can also call the tool directly. The panel always analyzes the session it is opened in, with the default tool options.
@@ -154,8 +155,9 @@ The text-report command is a small prompt (a prompt file on V1, registered by th
 | `sessionID` | current session | Analyze a specific session. Blank values use the current session. |
 | `limitMessages` | `3` | Entries shown per category; integer from 1 to 10. |
 | `includeSubagents` | `true` | Recursively include child-session usage and cost. |
+| `summaryOnly` (V2 only) | `false` | Return just the recorded token total, including child sessions unless excluded, without writing a report. |
 
-Each invocation writes a unique report to a private directory under the operating system's temporary directory and returns its exact path. Reports are not written into the analyzed worktree, and concurrent invocations cannot overwrite one another. The OS owns eventual cleanup.
+Full-report invocations write a unique report to a private directory under the operating system's temporary directory and return its exact path. Reports are not written into the analyzed worktree, and concurrent invocations cannot overwrite one another. The OS owns eventual cleanup.
 
 When the private report location is available, missing, empty, or inaccessible sessions produce a short report explaining the failure instead of polluting the project or silently returning partial output. If the location cannot be created or written, the tool returns an explicit inline error.
 

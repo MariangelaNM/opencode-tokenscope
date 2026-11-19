@@ -21,7 +21,7 @@ import {
 } from "./tokenscope-lib/opencode.js"
 import { ModelMetadataResolver } from "./tokenscope-lib/metadata.js"
 import { WarningCollector, formatErrorMessage } from "./tokenscope-lib/warnings.js"
-import { buildFailureReport, buildSuccessSummary, createReportPath, writeReport } from "./tokenscope-lib/report.js"
+import { buildFailureReport, buildSuccessSummary, createReportPath, formatTokenTotal, writeReport } from "./tokenscope-lib/report.js"
 import { TokenscopeRpc } from "./tokenscope-lib/rpc.js"
 import { buildReportView } from "./tokenscope-lib/view.js"
 import {
@@ -59,6 +59,10 @@ const TOOL_INPUT = {
       type: "boolean",
       description: "Include token costs from subagent child sessions (default: true)",
     },
+    summaryOnly: {
+      type: "boolean",
+      description: "Return only the recorded token total, without saving a report (default: false).",
+    },
   },
   additionalProperties: false,
 }
@@ -72,10 +76,17 @@ const COMMAND_PROMPT = [
   "Return that file verbatim without additional text or formatting.",
 ].join("\n")
 
+const TOTAL_COMMAND_PROMPT = [
+  `Call the ${TOOL_NAME} tool directly with summaryOnly set to true, without delegating to other agents.`,
+  "Leave sessionID unset unless the user explicitly asked to analyze a different session.",
+  "Return the tool output verbatim, without additional text or formatting.",
+].join("\n")
+
 interface TokenscopeArgs {
   sessionID?: string
   limitMessages?: number
   includeSubagents?: boolean
+  summaryOnly?: boolean
 }
 
 interface TokenscopeRuntime {
@@ -93,6 +104,7 @@ function readArgs(input: unknown): TokenscopeArgs {
     sessionID: typeof args.sessionID === "string" && args.sessionID.trim() ? args.sessionID.trim() : undefined,
     limitMessages: typeof args.limitMessages === "number" ? args.limitMessages : undefined,
     includeSubagents: typeof args.includeSubagents === "boolean" ? args.includeSubagents : undefined,
+    summaryOnly: args.summaryOnly === true,
   }
 }
 
@@ -166,7 +178,7 @@ async function analyzeSession(
   return { analysis, costCalculator }
 }
 
-// The tool path: writes the text report to a file the model can read back.
+// The tool returns either one recorded total or a text report for the model to read back.
 async function runTokenscope(
   runtime: TokenscopeRuntime,
   args: TokenscopeArgs,
@@ -174,6 +186,15 @@ async function runTokenscope(
 ): Promise<string> {
   const sessionID = args.sessionID ?? invocation.sessionID
   const warnings = new WarningCollector()
+
+  if (args.summaryOnly) {
+    try {
+      const result = await analyzeSession(runtime, args, sessionID, warnings)
+      return result ? formatTokenTotal(result.analysis) : `Session ${sessionID} has no messages yet.`
+    } catch (error) {
+      return `TokenScope could not calculate the total: ${formatErrorMessage(error)}`
+    }
+  }
 
   // Reports go to a private per-invocation file under OpenCode's temporary directory, which
   // agents may read without an external-directory prompt. Analyzed worktrees stay untouched.
@@ -245,7 +266,7 @@ const plugin: Plugin.Plugin = {
         name: TOOL_NAME,
         description: TOOL_DESCRIPTION,
         input: TOOL_INPUT,
-        // Expose the tool directly instead of only through Code Mode, so /tokenscope can call it.
+        // Expose the tool directly so the server commands can call it without Code Mode.
         options: { codemode: false },
         execute: async (input, context) => ({
           content: await runTokenscope(runtime, readArgs(input), context),
@@ -272,19 +293,24 @@ const plugin: Plugin.Plugin = {
     })
 
     await ctx.command.transform((editor) => {
-      editor.add({
-        name: COMMAND_NAME,
-        description: COMMAND_DESCRIPTION,
-        execute: async ({ sessionID, prompt, delivery }) => {
-          const request = prompt.text.trim()
-          await ctx.session.prompt({
-            ...prompt,
-            sessionID,
-            text: request ? `${COMMAND_PROMPT}\n\n${request}` : COMMAND_PROMPT,
-            delivery,
-          })
-        },
-      })
+      for (const [name, description, instructions] of [
+        [COMMAND_NAME, COMMAND_DESCRIPTION, COMMAND_PROMPT],
+        ["tokenscope-total", "Show only the recorded token total", TOTAL_COMMAND_PROMPT],
+      ]) {
+        editor.add({
+          name,
+          description,
+          execute: async ({ sessionID, prompt, delivery }) => {
+            const request = prompt.text.trim()
+            await ctx.session.prompt({
+              ...prompt,
+              sessionID,
+              text: request ? `${instructions}\n\n${request}` : instructions,
+              delivery,
+            })
+          },
+        })
+      }
     })
   },
 }
