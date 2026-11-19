@@ -8,6 +8,8 @@ TokenScope turns the telemetry OpenCode has persisted for a session into a reada
 
 ## Installation
 
+This fork's source package is `@mariangelanm/opencode-tokenscope`. The Windows installer builds it directly from this repository; npm publication is not required. The npm and Bash instructions below install the upstream package, `@ramtinj95/opencode-tokenscope`, not this fork.
+
 The same package supports OpenCode V2 and OpenCode V1. Use the section for the version reported by `opencode --version`.
 
 ### OpenCode V2

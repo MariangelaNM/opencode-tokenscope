@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@ramtinj95/opencode-tokenscope",
+  "name": "@mariangelanm/opencode-tokenscope",
   "version": "2.1.0",
   "description": "OpenCode plugin for detailed token usage analysis with breakdowns by category, visual charts, and subagent cost tracking",
   "type": "module",
@@ -33,12 +33,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ramtinj95/opencode-tokenscope.git"
+    "url": "git+https://github.com/MariangelaNM/opencode-tokenscope.git"
   },
   "bugs": {
     "url": "https://github.com/ramtinj95/opencode-tokenscope/issues"
   },
-  "homepage": "https://github.com/ramtinj95/opencode-tokenscope#readme",
+  "homepage": "https://github.com/MariangelaNM/opencode-tokenscope#readme",
   "author": "ramtinj95",
   "license": "MIT",
   "peerDependencies": {
